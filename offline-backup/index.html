@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>チキンセプト</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🐔 チキンセプト</h1>
+    <div id="goal">目標魔力: <span id="goalValue">1500</span> G</div>
+  </header>
+
+  <main>
+    <!-- プレイヤー情報 -->
+    <section id="players"></section>
+
+    <!-- ボード -->
+    <section id="boardWrap">
+      <div id="board"></div>
+      <div id="dice">
+        <div id="dieFace">-</div>
+        <button id="rollBtn">サイコロを振る</button>
+      </div>
+    </section>
+
+    <!-- 手札 -->
+    <section id="handWrap">
+      <h2>手札</h2>
+      <div id="hand"></div>
+    </section>
+
+    <!-- ログ -->
+    <section id="logWrap">
+      <h2>ログ</h2>
+      <div id="log"></div>
+    </section>
+  </main>
+
+  <!-- 選択ダイアログ -->
+  <div id="overlay" class="hidden">
+    <div id="dialog">
+      <p id="dialogText"></p>
+      <div id="dialogButtons"></div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

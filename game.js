@@ -1,0 +1,480 @@
+"use strict";
+/* ============================================================
+   チキンセプト オンライン版
+   - 状態(state)は1つのJSONとして Supabase の rooms 行に保存
+   - 手番のプレイヤーの端末だけが状態を計算して書き込む
+   - 他の端末は Realtime で受け取って再描画するだけ
+   ============================================================ */
+
+/* ---------- 定数・データ ---------- */
+const GOAL = 1500;
+const START_MAGIC = 200;
+const START_BONUS = 80;
+const HAND_SIZE = 5;
+const MAX_PLAYERS = 4;
+const COLORS = ["#3498db", "#e74c3c", "#2ecc71", "#e67e22"];
+
+const ELEMENTS = {
+  fire:  { name: "火" }, water: { name: "水" },
+  earth: { name: "地" }, wind:  { name: "風" },
+};
+
+const BOARD = [
+  { type: "start", grid: [1, 1] },
+  { type: "land", el: "fire",  grid: [1, 2] },
+  { type: "land", el: "water", grid: [1, 3] },
+  { type: "land", el: "fire",  grid: [1, 4] },
+  { type: "land", el: "earth", grid: [1, 5] },
+  { type: "land", el: "wind",  grid: [2, 5] },
+  { type: "land", el: "water", grid: [3, 5] },
+  { type: "land", el: "earth", grid: [4, 5] },
+  { type: "start", grid: [5, 5] },
+  { type: "land", el: "wind",  grid: [5, 4] },
+  { type: "land", el: "fire",  grid: [5, 3] },
+  { type: "land", el: "water", grid: [5, 2] },
+  { type: "land", el: "earth", grid: [5, 1] },
+  { type: "land", el: "wind",  grid: [4, 1] },
+  { type: "land", el: "earth", grid: [3, 1] },
+  { type: "land", el: "fire",  grid: [2, 1] },
+];
+
+const CREATURES = [
+  { name: "ヒヨコ戦士",     el: "fire",  cost: 30,  st: 20, hp: 30 },
+  { name: "サラマンダー",   el: "fire",  cost: 60,  st: 40, hp: 40 },
+  { name: "フェニックス",   el: "fire",  cost: 90,  st: 50, hp: 60 },
+  { name: "マーマン",       el: "water", cost: 40,  st: 25, hp: 45 },
+  { name: "クラーケン",     el: "water", cost: 80,  st: 45, hp: 55 },
+  { name: "リヴァイアサン", el: "water", cost: 100, st: 55, hp: 65 },
+  { name: "ゴーレム",       el: "earth", cost: 50,  st: 20, hp: 60 },
+  { name: "ガーディアン",   el: "earth", cost: 70,  st: 30, hp: 70 },
+  { name: "タイタン",       el: "earth", cost: 110, st: 50, hp: 80 },
+  { name: "ハーピー",       el: "wind",  cost: 35,  st: 30, hp: 25 },
+  { name: "グリフォン",     el: "wind",  cost: 65,  st: 45, hp: 35 },
+  { name: "テンペスト",     el: "wind",  cost: 95,  st: 60, hp: 45 },
+];
+
+/* ---------- ユーティリティ ---------- */
+const $ = (s) => document.querySelector(s);
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const rollDice = () => 1 + Math.floor(Math.random() * 6);
+
+function uuid() {
+  if (crypto.randomUUID) { try { return crypto.randomUUID(); } catch (e) {} }
+  const b = new Uint8Array(16); crypto.getRandomValues(b);
+  return [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+function drawCard() { return { ...CREATURES[Math.floor(Math.random() * CREATURES.length)] }; }
+function refill(p) { while (p.hand.length < HAND_SIZE) p.hand.push(drawCard()); }
+function tollOf(land) { return land && land.creature ? Math.round(land.creature.cost * 0.4) + 10 : 0; }
+function playerById(s, id) { return s.players.find((p) => p.id === id); }
+function totalMagic(s, p) {
+  let t = p.magic;
+  s.lands.forEach((l) => { if (l && l.owner === p.id) t += tollOf(l); });
+  return t;
+}
+function pushLog(s, msg, cls = "") { s.log.unshift({ msg, cls }); s.log = s.log.slice(0, 40); }
+
+/* ---------- 自分の識別 ---------- */
+let myId = localStorage.getItem("chickencept_pid");
+if (!myId) { myId = uuid(); localStorage.setItem("chickencept_pid", myId); }
+let myName = localStorage.getItem("chickencept_name") || "";
+
+/* ---------- ローカルに保持する部屋情報 ---------- */
+const room = { code: null, state: null, version: 0, channel: null };
+
+function isMyTurn() { return room.state && room.state.turn === myId; }
+function me() { return room.state ? playerById(room.state, myId) : null; }
+function amHost() { return room.state && room.state.host === myId; }
+
+/* ============================================================
+   ゲームロジック（状態を書き換える純粋関数群）
+   各 mutator は draft を受け取り、編集後 draft を返す。
+   無効な操作なら false を返して中断。
+   ============================================================ */
+
+function placeCreature(s, i, ownerId, card) {
+  const bonus = BOARD[i].el === card.el ? 10 : 0;
+  const maxHp = card.hp + bonus;
+  s.lands[i] = { owner: ownerId, creature: { name: card.name, el: card.el, st: card.st, hp: maxHp, maxHp, cost: card.cost } };
+}
+
+function payToll(s, p, owner, toll) {
+  const pay = Math.min(p.magic, toll);
+  p.magic -= pay; owner.magic += pay;
+  pushLog(s, `💰 ${p.name} → ${owner.name} に通行料 ${pay}G`);
+}
+
+function endTurn(s, p) {
+  if (totalMagic(s, p) >= s.goal) {
+    s.phase = "game_over"; s.winner = p.id;
+    pushLog(s, `🎉 ${p.name} が総魔力 ${s.goal}G 達成! 勝利!`, "win");
+    return;
+  }
+  const idx = s.players.findIndex((x) => x.id === p.id);
+  s.turn = s.players[(idx + 1) % s.players.length].id;
+  s.phase = "await_roll"; s.dice = null; s.pendingLand = null;
+}
+
+function resolveLanding(s, p) {
+  const i = p.pos, cell = BOARD[i];
+  if (cell.type === "start") { pushLog(s, `${p.name} はスタートに止まった`, "system"); endTurn(s, p); return; }
+  const land = s.lands[i];
+  if (!land) { s.phase = "await_summon"; s.pendingLand = i; return; }
+  if (land.owner === p.id) { pushLog(s, `${p.name} は自分の土地に止まった`, "system"); endTurn(s, p); return; }
+  s.phase = "await_enemy"; s.pendingLand = i;
+}
+
+// --- 各アクション ---
+function mRoll(s) {
+  if (s.turn !== myId || s.phase !== "await_roll") return false;
+  const p = playerById(s, myId);
+  const dice = rollDice(); s.dice = dice;
+  let bonus = 0;
+  for (let k = 0; k < dice; k++) { p.pos = (p.pos + 1) % BOARD.length; if (BOARD[p.pos].type === "start") bonus += START_BONUS; }
+  if (bonus) { p.magic += bonus; pushLog(s, `🏁 ${p.name} スタート通過 +${bonus}G`, "system"); }
+  pushLog(s, `🎲 ${p.name} は ${dice} を出した`);
+  resolveLanding(s, p);
+  return s;
+}
+
+function mSummon(s, cardIdx) {
+  if (s.turn !== myId || s.phase !== "await_summon") return false;
+  const p = playerById(s, myId), i = s.pendingLand;
+  if (cardIdx < 0) { pushLog(s, `${p.name} は召喚しなかった`, "system"); endTurn(s, p); return s; }
+  const card = p.hand[cardIdx];
+  if (!card || card.cost > p.magic) return false;
+  p.magic -= card.cost; p.hand.splice(cardIdx, 1);
+  placeCreature(s, i, p.id, card); refill(p);
+  pushLog(s, `✨ ${p.name} が ${card.name} を召喚 (-${card.cost}G)`);
+  endTurn(s, p); return s;
+}
+
+function mEnemy(s, choice) {
+  if (s.turn !== myId || s.phase !== "await_enemy") return false;
+  const p = playerById(s, myId), i = s.pendingLand, land = s.lands[i];
+  const owner = playerById(s, land.owner);
+  if (choice === "toll") { payToll(s, p, owner, tollOf(land)); endTurn(s, p); return s; }
+  if (choice === "invade") { if (p.hand.length === 0) return false; s.phase = "await_invade"; return s; }
+  return false;
+}
+
+function mInvade(s, cardIdx) {
+  if (s.turn !== myId || s.phase !== "await_invade") return false;
+  const p = playerById(s, myId), i = s.pendingLand, land = s.lands[i];
+  const owner = playerById(s, land.owner);
+  if (cardIdx < 0) { payToll(s, p, owner, tollOf(land)); endTurn(s, p); return s; }
+  const card = p.hand[cardIdx];
+  if (!card) return false;
+  const def = land.creature;
+  pushLog(s, `⚔ ${p.name}:${card.name}(⚔${card.st}) → ${owner.name}:${def.name}(❤${def.hp})`, "battle");
+  p.hand.splice(cardIdx, 1);
+  if (card.st >= def.hp) {
+    pushLog(s, `💥 ${def.name} を撃破! ${p.name} が土地を奪取!`, "battle");
+    placeCreature(s, i, p.id, card);
+  } else {
+    const atkAfter = card.hp - def.st;
+    if (atkAfter <= 0) pushLog(s, `💀 ${def.name} が反撃、${card.name} 撃破。侵略失敗`, "battle");
+    else pushLog(s, `↩ 両者生存。侵略失敗、${card.name} は撤退`, "battle");
+  }
+  refill(p); endTurn(s, p); return s;
+}
+
+/* ============================================================
+   通信グルー：mutator を適用して Supabase に書き込む
+   競合時は最新状態を取り込んで数回リトライ
+   ============================================================ */
+async function commit(mutator) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const draft = clone(room.state);
+    const next = mutator(draft);
+    if (next === false) return false;
+    const res = await sbPush(room.code, draft, room.version);
+    if (res.ok) { room.state = draft; room.version = res.version; render(); return true; }
+    room.state = res.state; room.version = res.version; // 競合 → 最新で再試行
+  }
+  render();
+  return false;
+}
+
+function onRemote(row) { room.state = row.state; room.version = row.version; render(); }
+
+/* ============================================================
+   画面遷移・描画
+   ============================================================ */
+function show(screen) {
+  ["home", "lobby", "game"].forEach((id) => $("#" + id).classList.toggle("hidden", id !== screen));
+}
+
+function render() {
+  if (!room.state) { show("home"); return; }
+  if (room.state.phase === "lobby") { show("lobby"); renderLobby(); return; }
+  show("game"); renderGame();
+}
+
+function renderLobby() {
+  const s = room.state;
+  $("#roomCode").textContent = room.code;
+  const list = $("#lobbyPlayers");
+  list.innerHTML = "";
+  s.players.forEach((p) => {
+    const div = document.createElement("div");
+    div.className = "lobby-player";
+    div.style.borderLeftColor = p.color;
+    div.innerHTML = `<span style="color:${p.color}">●</span> ${p.name}` +
+      (p.id === s.host ? " 👑" : "") + (p.id === myId ? " <small>(あなた)</small>" : "");
+    list.appendChild(div);
+  });
+  $("#startBtn").classList.toggle("hidden", !amHost());
+  $("#startBtn").disabled = s.players.length < 2;
+  $("#lobbyHint").textContent = amHost()
+    ? (s.players.length < 2 ? "もう1人以上の参加を待っています…" : "全員揃ったら開始できます")
+    : "ホストの開始を待っています…";
+}
+
+function renderGame() {
+  const s = room.state;
+  renderPlayersBar(s);
+  renderBoard(s);
+  renderControls(s);
+  renderLog(s);
+}
+
+function renderPlayersBar(s) {
+  const bar = $("#playersBar");
+  bar.innerHTML = "";
+  s.players.forEach((p) => {
+    const owned = s.lands.filter((l) => l && l.owner === p.id).length;
+    const div = document.createElement("div");
+    div.className = "pbar" + (p.id === s.turn ? " active" : "");
+    div.style.borderColor = p.color;
+    div.innerHTML = `<div class="pbar-name" style="color:${p.color}">${p.name}${p.id === myId ? "★" : ""}</div>
+      <div class="pbar-magic">${totalMagic(s, p)}G</div>
+      <div class="pbar-sub">現金${p.magic} 地${owned}</div>`;
+    bar.appendChild(div);
+  });
+}
+
+function renderBoard(s) {
+  const board = $("#board");
+  board.innerHTML = "";
+  BOARD.forEach((cell, i) => {
+    const div = document.createElement("div");
+    div.className = "cell " + (cell.type === "start" ? "start" : cell.el);
+    if (i === s.pendingLand) div.classList.add("pending");
+    div.style.gridRow = cell.grid[0];
+    div.style.gridColumn = cell.grid[1];
+    const land = s.lands[i];
+    let html = "";
+    if (cell.type === "start") {
+      html = `<div class="c-el">🏁START</div><div class="c-toll">+${START_BONUS}</div>`;
+    } else {
+      html = `<div class="c-el">${ELEMENTS[cell.el].name}</div>`;
+      if (land) {
+        const o = playerById(s, land.owner);
+        html += `<div class="c-cr">${land.creature.name}</div>
+          <div class="c-cr">⚔${land.creature.st}❤${land.creature.hp}</div>
+          <div class="c-toll" style="color:${o.color}">${o.name} ${tollOf(land)}G</div>`;
+      } else html += `<div class="c-empty">空き地</div>`;
+    }
+    let tokens = '<div class="tokens">';
+    s.players.forEach((p) => { if (p.pos === i) tokens += `<span class="token" style="background:${p.color}"></span>`; });
+    div.innerHTML = html + tokens + "</div>";
+    board.appendChild(div);
+  });
+}
+
+function renderControls(s) {
+  const c = $("#controls");
+  c.innerHTML = "";
+  const turnP = playerById(s, s.turn);
+
+  if (s.phase === "game_over") {
+    const w = playerById(s, s.winner);
+    c.innerHTML = `<div class="turn-msg win">🎉 ${w.name} の勝利!</div>`;
+    if (amHost()) addBtn(c, "もう一度（ロビーへ）", () => commit(mBackToLobby));
+    return;
+  }
+
+  const head = document.createElement("div");
+  head.className = "turn-msg";
+  head.innerHTML = isMyTurn()
+    ? `<b style="color:${me().color}">あなたの番</b>` + (s.dice ? ` 🎲${s.dice}` : "")
+    : `<span style="color:${turnP.color}">${turnP.name}</span> の番を待っています…`;
+  c.appendChild(head);
+
+  if (!isMyTurn()) return;
+  const p = me();
+
+  if (s.phase === "await_roll") {
+    addBtn(c, "🎲 サイコロを振る", () => commit(mRoll), "primary");
+  } else if (s.phase === "await_summon") {
+    const el = BOARD[s.pendingLand].el;
+    addText(c, `${ELEMENTS[el].name}属性の空き地。召喚する？(属性一致でHP+10)`);
+    renderHandButtons(c, p, (idx) => {
+      if (p.hand[idx].cost > p.magic) return;
+      commit((s2) => mSummon(s2, idx));
+    }, el);
+    addBtn(c, "召喚しない", () => commit((s2) => mSummon(s2, -1)));
+  } else if (s.phase === "await_enemy") {
+    const land = s.lands[s.pendingLand];
+    addText(c, `敵地：${land.creature.name} ⚔${land.creature.st} ❤${land.creature.hp}`);
+    addBtn(c, "⚔ 侵略する", () => commit((s2) => mEnemy(s2, "invade")), "primary");
+    addBtn(c, `💰 通行料 ${tollOf(land)}G`, () => commit((s2) => mEnemy(s2, "toll")));
+  } else if (s.phase === "await_invade") {
+    addText(c, "侵略するカードを選択（コスト不要）");
+    renderHandButtons(c, p, (idx) => commit((s2) => mInvade(s2, idx)));
+    addBtn(c, "やめて通行料を払う", () => commit((s2) => mInvade(s2, -1)));
+  }
+}
+
+function renderHandButtons(container, p, onPick, landEl) {
+  const wrap = document.createElement("div");
+  wrap.className = "hand";
+  p.hand.forEach((card, idx) => {
+    const b = document.createElement("button");
+    b.className = "card " + card.el;
+    const tooExp = landEl !== undefined && card.cost > p.magic;
+    if (tooExp) b.classList.add("disabled");
+    const match = landEl !== undefined && landEl === card.el ? "+10" : "";
+    b.innerHTML = `<div class="card-name">${card.name}</div>
+      <div class="card-stat"><span>${ELEMENTS[card.el].name}</span><span class="card-cost">${card.cost}G</span></div>
+      <div class="card-stat"><span>⚔${card.st}</span><span>❤${card.hp}${match}</span></div>`;
+    b.onclick = () => { if (!tooExp) onPick(idx); };
+    wrap.appendChild(b);
+  });
+  container.appendChild(wrap);
+}
+
+function renderLog(s) {
+  const log = $("#log");
+  log.innerHTML = "";
+  s.log.forEach((e) => {
+    const d = document.createElement("div");
+    d.className = "entry " + (e.cls || "");
+    d.textContent = e.msg;
+    log.appendChild(d);
+  });
+}
+
+function addBtn(parent, label, onClick, cls = "") {
+  const b = document.createElement("button");
+  b.textContent = label; b.className = "act " + cls; b.onclick = onClick;
+  parent.appendChild(b);
+}
+function addText(parent, t) {
+  const d = document.createElement("div"); d.className = "ctrl-text"; d.textContent = t; parent.appendChild(d);
+}
+
+/* ---------- ロビー操作 mutator ---------- */
+function mAddMe(s) {
+  if (s.started) { return s.players.some((p) => p.id === myId) ? s : false; }
+  if (s.players.some((p) => p.id === myId)) return s;
+  if (s.players.length >= MAX_PLAYERS) return false;
+  const seat = s.players.length;
+  s.players.push({ id: myId, name: myName, color: COLORS[seat], magic: START_MAGIC, pos: 0, hand: [] });
+  return s;
+}
+function mStart(s) {
+  if (s.host !== myId || s.players.length < 2) return false;
+  s.started = true; s.phase = "await_roll"; s.turn = s.players[0].id;
+  s.dice = null; s.pendingLand = null; s.goal = GOAL; s.winner = null;
+  s.lands = BOARD.map(() => null);
+  s.players.forEach((pl, i) => { pl.color = COLORS[i]; pl.magic = START_MAGIC; pl.pos = 0; pl.hand = []; refill(pl); });
+  s.log = [];
+  pushLog(s, "🐔 チキンセプト開始!", "system");
+  pushLog(s, `目標：総魔力 ${GOAL}G を最初に達成で勝利`, "system");
+  return s;
+}
+function mBackToLobby(s) {
+  if (s.host !== myId) return false;
+  s.started = false; s.phase = "lobby"; s.turn = null; s.dice = null;
+  s.pendingLand = null; s.winner = null; s.lands = [];
+  s.players.forEach((pl) => { pl.magic = START_MAGIC; pl.pos = 0; pl.hand = []; });
+  s.log = [];
+  return s;
+}
+
+/* ============================================================
+   ホーム画面の操作
+   ============================================================ */
+function attach(code) {
+  room.code = code;
+  location.hash = code;
+  if (room.channel) sb.removeChannel(room.channel);
+  room.channel = sbSubscribe(code, onRemote);
+}
+
+async function createRoom() {
+  if (!validateName()) return;
+  setBusy(true);
+  try {
+    const initial = {
+      phase: "lobby", host: myId, started: false, goal: GOAL,
+      players: [{ id: myId, name: myName, color: COLORS[0], magic: START_MAGIC, pos: 0, hand: [] }],
+      lands: [], log: [], turn: null, dice: null, pendingLand: null, winner: null,
+    };
+    const res = await sbCreateRoom(initial);
+    room.state = res.state; room.version = res.version;
+    attach(res.code);
+    render();
+  } catch (e) { showErr(e.message); }
+  setBusy(false);
+}
+
+async function joinRoom() {
+  if (!validateName()) return;
+  const code = $("#joinCode").value.trim().toUpperCase();
+  if (code.length < 3) { showErr("部屋コードを入力してください。"); return; }
+  setBusy(true);
+  try {
+    const got = await sbGetRoom(code);
+    if (!got) { showErr("その部屋は見つかりません。"); setBusy(false); return; }
+    room.state = got.state; room.version = got.version; room.code = code;
+    attach(code);
+    const ok = await commit(mAddMe);
+    if (!ok && !playerById(room.state, myId)) {
+      showErr(room.state.started ? "対局中で参加できません。" : "満席です。");
+    }
+    render();
+  } catch (e) { showErr(e.message); }
+  setBusy(false);
+}
+
+function validateName() {
+  const n = $("#nameInput").value.trim();
+  if (!n) { showErr("名前を入力してください。"); return false; }
+  myName = n.slice(0, 12); localStorage.setItem("chickencept_name", myName);
+  return true;
+}
+function showErr(msg) { $("#homeErr").textContent = msg; }
+function setBusy(b) { $("#createBtn").disabled = b; $("#joinBtn").disabled = b; }
+
+function leaveRoom() {
+  if (room.channel) { sb.removeChannel(room.channel); room.channel = null; }
+  room.code = null; room.state = null; room.version = 0;
+  location.hash = "";
+  render();
+}
+
+/* ============================================================
+   起動
+   ============================================================ */
+function boot() {
+  if (!netReady()) {
+    $("#configWarn").classList.remove("hidden");
+  }
+  if (myName) $("#nameInput").value = myName;
+  const hash = location.hash.replace("#", "").toUpperCase();
+  if (hash) $("#joinCode").value = hash;
+
+  $("#createBtn").onclick = createRoom;
+  $("#joinBtn").onclick = joinRoom;
+  $("#startBtn").onclick = () => commit(mStart);
+  $("#leaveLobbyBtn").onclick = leaveRoom;
+  $("#leaveGameBtn").onclick = leaveRoom;
+
+  render();
+}
+
+boot();

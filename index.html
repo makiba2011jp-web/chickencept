@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>チキンセプト オンライン</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- 設定未完了の警告 -->
+    <div id="configWarn" class="hidden">
+      ⚠ config.js に Supabase の URL とキーが未設定です。SETUP.md を参照してください。
+    </div>
+
+    <!-- ホーム画面 -->
+    <section id="home">
+      <h1>🐔 チキンセプト</h1>
+      <p class="tagline">スマホ4人 通信対戦</p>
+
+      <label>あなたの名前</label>
+      <input id="nameInput" type="text" placeholder="名前を入力" maxlength="12">
+
+      <button id="createBtn" class="big primary">部屋を作る</button>
+
+      <div class="divider">または</div>
+
+      <label>部屋コードで参加</label>
+      <input id="joinCode" type="text" placeholder="例: AB12" maxlength="4" autocapitalize="characters">
+      <button id="joinBtn" class="big">参加する</button>
+
+      <div id="homeErr" class="err"></div>
+    </section>
+
+    <!-- ロビー画面 -->
+    <section id="lobby" class="hidden">
+      <h2>待機ロビー</h2>
+      <div class="room-code">部屋コード：<span id="roomCode">----</span></div>
+      <p class="hint">このコードを友達に伝えて参加してもらおう（URLの共有でもOK）</p>
+      <div id="lobbyPlayers"></div>
+      <p id="lobbyHint" class="hint"></p>
+      <button id="startBtn" class="big primary hidden">ゲーム開始</button>
+      <button id="leaveLobbyBtn" class="ghost">退出</button>
+    </section>
+
+    <!-- ゲーム画面 -->
+    <section id="game" class="hidden">
+      <div id="playersBar"></div>
+      <div id="board"></div>
+      <div id="controls"></div>
+      <details id="logBox">
+        <summary>ログ</summary>
+        <div id="log"></div>
+      </details>
+      <button id="leaveGameBtn" class="ghost">退出</button>
+    </section>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="net.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

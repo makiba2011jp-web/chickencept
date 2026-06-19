@@ -1,0 +1,131 @@
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+:root {
+  --fire: #e74c3c; --water: #3498db; --earth: #27ae60; --wind: #f1c40f; --start: #9b59b6;
+}
+
+body {
+  font-family: "Segoe UI", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  background: #1e2330; color: #ecf0f1;
+  min-height: 100vh; padding: 10px;
+}
+#app { max-width: 540px; margin: 0 auto; }
+.hidden { display: none !important; }
+
+h1 { font-size: 28px; text-align: center; }
+h2 { font-size: 20px; text-align: center; margin-bottom: 10px; }
+.tagline { text-align: center; color: #95a5a6; margin-bottom: 20px; }
+
+#configWarn {
+  background: #c0392b; color: #fff; padding: 10px; border-radius: 6px;
+  font-size: 13px; margin-bottom: 12px; text-align: center;
+}
+
+/* ---------- 入力・ボタン ---------- */
+label { display: block; font-size: 13px; color: #bdc3c7; margin: 14px 0 4px; }
+input[type=text] {
+  width: 100%; padding: 12px; font-size: 16px; border-radius: 8px;
+  border: 2px solid #3a4252; background: #2c3340; color: #ecf0f1;
+}
+input:focus { outline: none; border-color: #f1c40f; }
+#joinCode { letter-spacing: 4px; text-transform: uppercase; font-weight: bold; }
+
+button {
+  cursor: pointer; border: none; border-radius: 8px; font-weight: bold;
+  font-family: inherit;
+}
+button.big { width: 100%; padding: 14px; font-size: 17px; margin-top: 12px; }
+.primary { background: #f39c12; color: #1e2330; }
+.primary:hover { background: #f1c40f; }
+button:not(.primary):not(.ghost) { background: #3a4252; color: #ecf0f1; }
+.ghost { background: transparent; color: #7f8c8d; width: 100%; padding: 10px; margin-top: 16px; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+
+.divider { text-align: center; color: #5a6472; margin: 20px 0 4px; font-size: 13px; }
+.err { color: #e74c3c; text-align: center; margin-top: 12px; font-size: 14px; min-height: 20px; }
+.hint { color: #95a5a6; font-size: 13px; text-align: center; margin: 8px 0; }
+
+/* ---------- ロビー ---------- */
+.room-code {
+  text-align: center; font-size: 20px; margin: 12px 0; color: #bdc3c7;
+}
+.room-code span {
+  font-size: 34px; font-weight: bold; color: #f1c40f; letter-spacing: 6px;
+  display: inline-block; margin-left: 6px;
+}
+#lobbyPlayers { margin: 16px 0; }
+.lobby-player {
+  background: #2c3340; border-left: 5px solid #555; border-radius: 6px;
+  padding: 12px; margin-bottom: 8px; font-size: 16px;
+}
+.lobby-player small { color: #95a5a6; }
+
+/* ---------- ゲーム：プレイヤーバー ---------- */
+#playersBar { display: flex; gap: 6px; margin-bottom: 10px; }
+.pbar {
+  flex: 1; background: #2c3340; border: 2px solid #555; border-radius: 8px;
+  padding: 6px 4px; text-align: center; min-width: 0;
+}
+.pbar.active { box-shadow: 0 0 0 2px #f1c40f; }
+.pbar-name { font-size: 12px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbar-magic { font-size: 16px; font-weight: bold; color: #f1c40f; }
+.pbar-sub { font-size: 10px; color: #95a5a6; }
+
+/* ---------- ボード ---------- */
+#board {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 3px;
+  width: 100%; aspect-ratio: 1 / 1;
+  margin-bottom: 10px;
+}
+.cell {
+  border-radius: 5px; padding: 2px; position: relative; overflow: hidden;
+  background: #2c3340; border: 2px solid transparent;
+  display: flex; flex-direction: column; justify-content: center;
+  font-size: 9px; line-height: 1.15; text-align: center;
+}
+.cell.fire  { background: #3a1f1c; border-color: var(--fire); }
+.cell.water { background: #15293a; border-color: var(--water); }
+.cell.earth { background: #143020; border-color: var(--earth); }
+.cell.wind  { background: #3a3410; border-color: var(--wind); }
+.cell.start { background: #2e1a38; border-color: var(--start); }
+.cell.pending { box-shadow: 0 0 0 2px #fff inset; }
+.c-el { font-weight: bold; font-size: 11px; }
+.c-cr { font-size: 9px; color: #ecf0f1; font-weight: bold; }
+.c-empty { color: #7f8c8d; font-size: 9px; }
+.c-toll { font-size: 9px; }
+.tokens { position: absolute; top: 1px; right: 1px; display: flex; gap: 1px; flex-wrap: wrap; max-width: 60%; justify-content: flex-end; }
+.token { width: 10px; height: 10px; border-radius: 50%; border: 1px solid #fff; display: inline-block; }
+
+/* ---------- コントロール ---------- */
+#controls { background: #2c3340; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.turn-msg { text-align: center; font-size: 16px; margin-bottom: 8px; }
+.turn-msg.win { font-size: 20px; color: #2ecc71; }
+.ctrl-text { text-align: center; font-size: 13px; color: #bdc3c7; margin: 6px 0; }
+button.act { width: 100%; padding: 13px; font-size: 16px; margin-top: 8px; }
+
+/* 手札カード（ボタン） */
+.hand { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 8px 0; }
+.card {
+  width: 88px; background: #232a36; border-top: 4px solid #555; border-radius: 6px;
+  padding: 6px; font-size: 11px; text-align: left; color: #ecf0f1;
+}
+.card.fire { border-color: var(--fire); }
+.card.water { border-color: var(--water); }
+.card.earth { border-color: var(--earth); }
+.card.wind { border-color: var(--wind); }
+.card.disabled { opacity: .35; }
+.card-name { font-weight: bold; font-size: 12px; margin-bottom: 4px; }
+.card-stat { display: flex; justify-content: space-between; }
+.card-cost { color: #f1c40f; }
+
+/* ---------- ログ ---------- */
+#logBox { background: #161b26; border-radius: 8px; padding: 6px 10px; }
+#logBox summary { cursor: pointer; color: #95a5a6; font-size: 14px; padding: 4px 0; }
+#log { max-height: 200px; overflow-y: auto; font-size: 13px; line-height: 1.6; margin-top: 6px; }
+.entry { border-bottom: 1px solid #2c3340; padding: 2px 0; }
+.battle { color: #e67e22; }
+.win { color: #2ecc71; font-weight: bold; }
+.system { color: #95a5a6; }

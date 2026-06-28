@@ -507,16 +507,29 @@ function toggleMute() {
   updateMuteBtn();
 }
 
+// 最初のユーザー操作で「両方の曲」を解禁する（後で曲を切り替えても鳴るように）
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  [bgmTitle, bgmGame].forEach((a) => {
+    const p = a.play();
+    if (p) p.then(() => {
+      // 今鳴らすべき曲以外（とミュート時）は止めておく
+      if (muted || a !== currentBgm) { a.pause(); a.currentTime = 0; }
+    }).catch(() => {});
+  });
+}
+
 /* ============================================================
    起動
    ============================================================ */
 function boot() {
   updateMuteBtn();
   $("#muteBtn").onclick = toggleMute;
-  // 最初の操作でBGM開始（自動再生ブロック対策）
-  document.addEventListener("click", () => {
-    if (currentBgm && !muted) currentBgm.play().catch(() => {});
-  }, { once: true });
+  // 最初の操作で両方の曲を解禁（自動再生ブロック＆曲切替対策）
+  ["pointerdown", "click", "keydown"].forEach((ev) =>
+    document.addEventListener(ev, unlockAudio, { passive: true }));
 
   if (!netReady()) {
     $("#configWarn").classList.remove("hidden");

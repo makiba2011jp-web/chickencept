@@ -19,6 +19,19 @@
 | グリフォン     | 風 | `griffon.png` / `.jpg` |
 | テンペスト     | 風 | `tempest.png` / `.jpg` |
 
+## アイテムカード（画像は任意・無ければテキスト表示）
+| アイテム | 効果 | ファイル名 |
+|---|---|---|
+| くさりかたびら | 体力+10 | `chainmail.png` / `.jpg` |
+| てつのよろい   | 体力+20 | `ironarmor.png` / `.jpg` |
+| ほのおのよろい | 体力+30 | `flamearmor.png` / `.jpg` |
+| ATフィールド   | 体力+40 | `atfield.png` / `.jpg` |
+| たけのやり     | 攻撃+10 | `bamboospear.png` / `.jpg` |
+| どうのつるぎ   | 攻撃+20 | `coppersword.png` / `.jpg` |
+| はじゃのつるぎ | 攻撃+30 | `hajasword.png` / `.jpg` |
+| ロトのつるぎ   | 攻撃+40 | `rotosword.png` / `.jpg` |
+| スーパーかがみ | 攻撃を反射 | `mirror.png` / `.jpg` |
+
 ## メモ
 - PNG・JPG どちらでも可（拡張子はそのままでOK、変換不要）
 - できれば正方形（例 512×512）にトリミングすると、手札カードがきれいに収まります

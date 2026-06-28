@@ -9,8 +9,15 @@ body {
   background: #1e2330; color: #ecf0f1;
   min-height: 100vh; padding: 10px;
 }
-#app { max-width: 540px; margin: 0 auto; }
+#app { max-width: 540px; margin: 0 auto; position: relative; }
 .hidden { display: none !important; }
+
+#muteBtn {
+  position: fixed; top: 8px; right: 8px; z-index: 50;
+  width: 44px; height: 44px; border-radius: 50%;
+  background: #2c3340; color: #ecf0f1; font-size: 20px;
+  border: 2px solid #3a4252; padding: 0;
+}
 
 h1 { font-size: 28px; text-align: center; }
 h2 { font-size: 20px; text-align: center; margin-bottom: 10px; }

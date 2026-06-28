@@ -207,6 +207,7 @@ function show(screen) {
 }
 
 function render() {
+  syncBgm();
   if (!room.state) { show("home"); return; }
   if (room.state.phase === "lobby") { show("lobby"); renderLobby(); return; }
   show("game"); renderGame();
@@ -458,9 +459,52 @@ function leaveRoom() {
 }
 
 /* ============================================================
+   BGM（音楽）
+   - assets/bgm.mp3 を置くだけで再生されます（無ければ無音）
+   - ブラウザの制約で、最初のクリック後に再生開始します
+   ============================================================ */
+// 2曲：タイトル/ロビー用と、対戦中用。画面に応じて自動で切り替わる
+const bgmTitle = new Audio("assets/title.mp3"); // タイトル・ロビー
+const bgmGame = new Audio("assets/bgm.mp3");     // 対戦中
+[bgmTitle, bgmGame].forEach((a) => { a.loop = true; a.volume = 0.4; });
+let currentBgm = null;
+let muted = localStorage.getItem("chickencept_muted") === "1";
+
+function updateMuteBtn() { $("#muteBtn").textContent = muted ? "🔇" : "🔊"; }
+
+// 指定の曲に切り替え（同じ曲なら何もしない）
+function playTrack(track) {
+  if (currentBgm === track) return;
+  if (currentBgm) currentBgm.pause();
+  currentBgm = track;
+  if (!muted && track) track.play().catch(() => {});
+}
+
+// 今の画面に合ったBGMを選ぶ（ホーム・ロビー=タイトル曲、対戦中=ゲーム曲）
+function syncBgm() {
+  const onTitle = !room.state || room.state.phase === "lobby";
+  playTrack(onTitle ? bgmTitle : bgmGame);
+}
+
+function toggleMute() {
+  muted = !muted;
+  localStorage.setItem("chickencept_muted", muted ? "1" : "0");
+  if (muted) { if (currentBgm) currentBgm.pause(); }
+  else if (currentBgm) currentBgm.play().catch(() => {});
+  updateMuteBtn();
+}
+
+/* ============================================================
    起動
    ============================================================ */
 function boot() {
+  updateMuteBtn();
+  $("#muteBtn").onclick = toggleMute;
+  // 最初の操作でBGM開始（自動再生ブロック対策）
+  document.addEventListener("click", () => {
+    if (currentBgm && !muted) currentBgm.play().catch(() => {});
+  }, { once: true });
+
   if (!netReady()) {
     $("#configWarn").classList.remove("hidden");
   }

@@ -97,6 +97,8 @@ function totalMagic(s, p) {
   return t;
 }
 function pushLog(s, msg, cls = "") { s.log.unshift({ msg, cls }); s.log = s.log.slice(0, 40); }
+// 効果音イベントを記録（全端末で同期再生する）
+function ev(s, sfx) { s.seq = (s.seq || 0) + 1; s.lastEvent = { seq: s.seq, sfx }; }
 
 /* ---------- 自分の識別 ---------- */
 let myId = localStorage.getItem("chickencept_pid");
@@ -132,6 +134,7 @@ function endTurn(s, p) {
   if (totalMagic(s, p) >= s.goal) {
     s.phase = "game_over"; s.winner = p.id;
     pushLog(s, `🎉 ${p.name} が総魔力 ${s.goal}G 達成! 勝利!`, "win");
+    ev(s, "win");
     return;
   }
   const idx = s.players.findIndex((x) => x.id === p.id);
@@ -157,6 +160,7 @@ function mRoll(s) {
   for (let k = 0; k < dice; k++) { p.pos = (p.pos + 1) % BOARD.length; if (BOARD[p.pos].type === "start") bonus += START_BONUS; }
   if (bonus) { p.magic += bonus; pushLog(s, `🏁 ${p.name} スタート通過 +${bonus}G`, "system"); }
   pushLog(s, `🎲 ${p.name} は ${dice} を出した`);
+  ev(s, "dice");
   resolveLanding(s, p);
   return s;
 }
@@ -170,6 +174,7 @@ function mSummon(s, cardIdx) {
   p.magic -= card.cost; p.hand.splice(cardIdx, 1);
   placeCreature(s, i, p.id, card); refill(p);
   pushLog(s, `✨ ${p.name} が ${card.name} を召喚 (-${card.cost}G)`);
+  ev(s, "summon");
   endTurn(s, p); return s;
 }
 
@@ -177,7 +182,7 @@ function mEnemy(s, choice) {
   if (s.turn !== myId || s.phase !== "await_enemy") return false;
   const p = playerById(s, myId), i = s.pendingLand, land = s.lands[i];
   const owner = playerById(s, land.owner);
-  if (choice === "toll") { payToll(s, p, owner, tollOf(land)); endTurn(s, p); return s; }
+  if (choice === "toll") { payToll(s, p, owner, tollOf(land)); ev(s, "coin"); endTurn(s, p); return s; }
   if (choice === "invade") { if (p.hand.length === 0) return false; s.phase = "await_invade"; return s; }
   return false;
 }
@@ -186,7 +191,7 @@ function mInvade(s, cardIdx) {
   if (s.turn !== myId || s.phase !== "await_invade") return false;
   const p = playerById(s, myId), i = s.pendingLand, land = s.lands[i];
   const owner = playerById(s, land.owner);
-  if (cardIdx < 0) { payToll(s, p, owner, tollOf(land)); endTurn(s, p); return s; }
+  if (cardIdx < 0) { payToll(s, p, owner, tollOf(land)); ev(s, "coin"); endTurn(s, p); return s; }
   const card = p.hand[cardIdx];
   if (!card) return false;
   const def = land.creature;
@@ -200,6 +205,7 @@ function mInvade(s, cardIdx) {
     if (atkAfter <= 0) pushLog(s, `💀 ${def.name} が反撃、${card.name} 撃破。侵略失敗`, "battle");
     else pushLog(s, `↩ 両者生存。侵略失敗、${card.name} は撤退`, "battle");
   }
+  ev(s, "battle");
   refill(p); endTurn(s, p); return s;
 }
 
@@ -231,6 +237,8 @@ function show(screen) {
 
 function render() {
   syncBgm();
+  checkSfx();
+  checkVictory();
   if (!room.state) { show("home"); return; }
   if (room.state.phase === "lobby") { show("lobby"); renderLobby(); return; }
   show("game"); renderGame();
@@ -525,6 +533,8 @@ function toggleMute() {
 // 最初のユーザー操作で「両方の曲」を解禁する（後で曲を切り替えても鳴るように）
 let audioUnlocked = false;
 function unlockAudio() {
+  const ctx = audioCtx();
+  if (ctx && ctx.state === "suspended") ctx.resume();
   if (audioUnlocked) return;
   audioUnlocked = true;
   [bgmTitle, bgmGame].forEach((a) => {
@@ -534,6 +544,99 @@ function unlockAudio() {
       if (muted || a !== currentBgm) { a.pause(); a.currentTime = 0; }
     }).catch(() => {});
   });
+}
+
+/* ---------- 効果音（Web Audioで合成。音声ファイル不要） ---------- */
+let actx = null;
+function audioCtx() {
+  if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  return actx;
+}
+function tone(freq, start, dur, type = "square", gain = 0.18) {
+  const ctx = audioCtx(); if (!ctx) return;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type; o.frequency.value = freq;
+  o.connect(g); g.connect(ctx.destination);
+  const t = ctx.currentTime + start;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function noiseBurst(start, dur, gain = 0.2) {
+  const ctx = audioCtx(); if (!ctx) return;
+  const n = ctx.createBufferSource();
+  const buf = ctx.createBuffer(1, Math.max(1, ctx.sampleRate * dur), ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  n.buffer = buf;
+  const g = ctx.createGain(); const t = ctx.currentTime + start;
+  g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  n.connect(g); g.connect(ctx.destination);
+  n.start(t); n.stop(t + dur);
+}
+function playSfx(type) {
+  if (muted) return;
+  const ctx = audioCtx(); if (!ctx) return;
+  if (ctx.state === "suspended") ctx.resume();
+  switch (type) {
+    case "dice":
+      noiseBurst(0, 0.05, 0.18); noiseBurst(0.09, 0.05, 0.16); noiseBurst(0.18, 0.06, 0.14); break;
+    case "summon":
+      tone(440, 0, 0.12, "triangle", 0.2); tone(660, 0.1, 0.14, "triangle", 0.2); tone(880, 0.22, 0.16, "triangle", 0.18); break;
+    case "coin":
+      tone(988, 0, 0.07, "square", 0.16); tone(1319, 0.06, 0.13, "square", 0.16); break;
+    case "battle":
+      noiseBurst(0, 0.16, 0.28); tone(110, 0, 0.22, "sawtooth", 0.22); tone(70, 0.04, 0.22, "sawtooth", 0.18); break;
+    case "win": {
+      const notes = [523, 659, 784, 1047, 1047];
+      notes.forEach((f, i) => tone(f, i * 0.14, 0.22, "triangle", 0.22));
+      tone(1568, 0.7, 0.5, "triangle", 0.2); break;
+    }
+  }
+}
+
+// 新しい効果音イベントを検出して鳴らす（全端末で同期）
+let lastSfxSeq = null;
+function checkSfx() {
+  const e = room.state && room.state.lastEvent;
+  if (!e) return;
+  if (lastSfxSeq === null) { lastSfxSeq = e.seq; return; } // 初回（途中参加等）は鳴らさない
+  if (e.seq > lastSfxSeq) { lastSfxSeq = e.seq; playSfx(e.sfx); }
+}
+
+/* ---------- 勝利演出 ---------- */
+let victoryShown = false;
+function spawnConfetti() {
+  const c = $("#confetti"); c.innerHTML = "";
+  const colors = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f", "#9b59b6", "#e67e22"];
+  for (let i = 0; i < 90; i++) {
+    const p = document.createElement("div");
+    p.className = "confetti-piece";
+    p.style.left = Math.random() * 100 + "%";
+    p.style.background = colors[i % colors.length];
+    p.style.animationDelay = (Math.random() * 0.9) + "s";
+    p.style.animationDuration = (1.6 + Math.random() * 1.6) + "s";
+    p.style.transform = `rotate(${Math.random() * 360}deg)`;
+    c.appendChild(p);
+  }
+}
+function showVictory(name, color) {
+  $("#victoryName").textContent = name;
+  $("#victoryName").style.color = color;
+  spawnConfetti();
+  $("#victory").classList.remove("hidden");
+}
+function hideVictory() { $("#victory").classList.add("hidden"); $("#confetti").innerHTML = ""; }
+function checkVictory() {
+  const over = room.state && room.state.phase === "game_over";
+  if (over && !victoryShown) {
+    victoryShown = true;
+    const w = playerById(room.state, room.state.winner);
+    showVictory(w.name, w.color);
+  } else if (!over && victoryShown) {
+    victoryShown = false; hideVictory();
+  }
 }
 
 /* ============================================================
@@ -561,6 +664,7 @@ function boot() {
   $("#startBtn").onclick = () => commit(mStart);
   $("#leaveLobbyBtn").onclick = leaveRoom;
   $("#leaveGameBtn").onclick = leaveRoom;
+  $("#victoryClose").onclick = hideVictory;
 
   render();
 }

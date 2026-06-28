@@ -499,55 +499,39 @@ function leaveRoom() {
    - assets/bgm.mp3 を置くだけで再生されます（無ければ無音）
    - ブラウザの制約で、最初のクリック後に再生開始します
    ============================================================ */
-// 2曲：タイトル/ロビー用と、対戦中用。画面に応じて自動で切り替わる
-const bgmTitle = new Audio("assets/title.mp3"); // タイトル・ロビー
-const bgmGame = new Audio("assets/bgm.mp3");     // 対戦中
-[bgmTitle, bgmGame].forEach((a) => { a.loop = true; a.volume = 0.4; });
-let currentBgm = null;
+// BGMは「1つの音声要素」でsrcを差し替えて切替（2曲が物理的に重ならない）
+const bgm = new Audio();
+bgm.loop = true;
+bgm.volume = 0.4;
+const BGM_TITLE = "assets/title.mp3"; // タイトル・ロビー
+const BGM_GAME = "assets/bgm.mp3";    // 対戦中
+let currentSrc = null;
 let muted = localStorage.getItem("chickencept_muted") === "1";
 
 function updateMuteBtn() { $("#muteBtn").textContent = muted ? "🔇" : "🔊"; }
 
-// 指定の曲に切り替え（同じ曲なら何もしない）
-function playTrack(track) {
-  if (currentBgm === track) return;
-  if (currentBgm) currentBgm.pause();
-  currentBgm = track;
-  if (!muted && track) track.play().catch(() => {});
-}
-
-// 今の画面に合ったBGMを選ぶ（ホーム・ロビー=タイトル曲、対戦中=ゲーム曲）
+// 今の画面に合った曲に切り替える（ホーム・ロビー=タイトル曲、対戦中=ゲーム曲）
 function syncBgm() {
-  const onTitle = !room.state || room.state.phase === "lobby";
-  playTrack(onTitle ? bgmTitle : bgmGame);
+  const src = (!room.state || room.state.phase === "lobby") ? BGM_TITLE : BGM_GAME;
+  if (currentSrc === src) return;
+  currentSrc = src;
+  bgm.src = src;       // 差し替えた時点で前の曲は自動停止
+  if (!muted) bgm.play().catch(() => {});
 }
 
 function toggleMute() {
   muted = !muted;
   localStorage.setItem("chickencept_muted", muted ? "1" : "0");
-  if (muted) { if (currentBgm) currentBgm.pause(); }
-  else if (currentBgm) currentBgm.play().catch(() => {});
+  if (muted) bgm.pause();
+  else bgm.play().catch(() => {});
   updateMuteBtn();
 }
 
-// 最初のユーザー操作で「今の曲以外」を“消音したまま”一瞬再生して解禁する
-// （音を漏らさず、後で曲を切り替えても鳴るようにする）
-let audioUnlocked = false;
+// 最初のユーザー操作でオーディオを解禁（自動再生ブロック対策）
 function unlockAudio() {
   const ctx = audioCtx();
   if (ctx && ctx.state === "suspended") ctx.resume();
-  if (audioUnlocked) return;
-  audioUnlocked = true;
-  [bgmTitle, bgmGame].forEach((a) => {
-    if (a === currentBgm) return; // 今の曲はそのまま（playTrackが管理）
-    a.muted = true;
-    const done = () => { a.pause(); a.currentTime = 0; a.muted = false; };
-    const p = a.play();
-    if (p && p.then) p.then(done).catch(() => { a.muted = false; });
-    else done();
-  });
-  // 今の画面の曲を（ミュートでなければ）鳴らす
-  if (!muted && currentBgm) currentBgm.play().catch(() => {});
+  if (!muted && currentSrc && bgm.paused) bgm.play().catch(() => {});
 }
 
 /* ---------- 効果音（Web Audioで合成。音声ファイル不要） ---------- */

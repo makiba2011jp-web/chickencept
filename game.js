@@ -58,13 +58,13 @@ CREATURES.forEach((c) => (c.type = "creature"));
 // アイテムカード：戦闘時に1枚使用（使い切り）。effect: hp=体力, st=攻撃, mirror=反射
 const ITEMS = [
   { name: "くさりかたびら", type: "item", effect: "hp", value: 10, img: "chainmail" },
-  { name: "てつのよろい",   type: "item", effect: "hp", value: 20, img: "ironarmor" },
-  { name: "ほのおのよろい", type: "item", effect: "hp", value: 30, img: "flamearmor" },
-  { name: "ATフィールド",   type: "item", effect: "hp", value: 40, img: "atfield" },
-  { name: "たけのやり",     type: "item", effect: "st", value: 10, img: "bamboospear" },
-  { name: "どうのつるぎ",   type: "item", effect: "st", value: 20, img: "coppersword" },
-  { name: "はじゃのつるぎ", type: "item", effect: "st", value: 30, img: "hajasword" },
-  { name: "ロトのつるぎ",   type: "item", effect: "st", value: 40, img: "rotosword" },
+  { name: "鋼鉄の盾",       type: "item", effect: "hp", value: 20, img: "steelshield" },
+  { name: "伝説の鎧",       type: "item", effect: "hp", value: 30, img: "legendarmor" },
+  { name: "しぶきの鎧",     type: "item", effect: "hp", value: 40, img: "sprayarmor" },
+  { name: "針",             type: "item", effect: "st", value: 10, img: "needle" },
+  { name: "包丁",           type: "item", effect: "st", value: 20, img: "kitchenknife" },
+  { name: "マシンガン",     type: "item", effect: "st", value: 30, img: "machinegun" },
+  { name: "戦車砲",         type: "item", effect: "st", value: 40, img: "tankcannon" },
   { name: "スーパーかがみ", type: "item", effect: "mirror", value: 0, img: "mirror" },
 ];
 

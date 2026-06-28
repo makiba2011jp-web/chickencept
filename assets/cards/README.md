@@ -23,13 +23,13 @@
 | アイテム | 効果 | ファイル名 |
 |---|---|---|
 | くさりかたびら | 体力+10 | `chainmail.png` / `.jpg` |
-| てつのよろい   | 体力+20 | `ironarmor.png` / `.jpg` |
-| ほのおのよろい | 体力+30 | `flamearmor.png` / `.jpg` |
-| ATフィールド   | 体力+40 | `atfield.png` / `.jpg` |
-| たけのやり     | 攻撃+10 | `bamboospear.png` / `.jpg` |
-| どうのつるぎ   | 攻撃+20 | `coppersword.png` / `.jpg` |
-| はじゃのつるぎ | 攻撃+30 | `hajasword.png` / `.jpg` |
-| ロトのつるぎ   | 攻撃+40 | `rotosword.png` / `.jpg` |
+| 鋼鉄の盾       | 体力+20 | `steelshield.png` / `.jpg` |
+| 伝説の鎧       | 体力+30 | `legendarmor.png` / `.jpg` |
+| しぶきの鎧     | 体力+40 | `sprayarmor.png` / `.jpg` |
+| 針             | 攻撃+10 | `needle.png` / `.jpg` |
+| 包丁           | 攻撃+20 | `kitchenknife.png` / `.jpg` |
+| マシンガン     | 攻撃+30 | `machinegun.png` / `.jpg` |
+| 戦車砲         | 攻撃+40 | `tankcannon.png` / `.jpg` |
 | スーパーかがみ | 攻撃を反射 | `mirror.png` / `.jpg` |
 
 ## メモ

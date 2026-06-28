@@ -38,20 +38,29 @@ const BOARD = [
   { type: "land", el: "fire",  grid: [2, 1] },
 ];
 
+// img: assets/cards/ の画像名（拡張子なし）。png→jpg の順に自動で探す。無ければ非表示
 const CREATURES = [
-  { name: "ヒヨコ戦士",     el: "fire",  cost: 30,  st: 20, hp: 30 },
-  { name: "サラマンダー",   el: "fire",  cost: 60,  st: 40, hp: 40 },
-  { name: "フェニックス",   el: "fire",  cost: 90,  st: 50, hp: 60 },
-  { name: "マーマン",       el: "water", cost: 40,  st: 25, hp: 45 },
-  { name: "クラーケン",     el: "water", cost: 80,  st: 45, hp: 55 },
-  { name: "リヴァイアサン", el: "water", cost: 100, st: 55, hp: 65 },
-  { name: "ゴーレム",       el: "earth", cost: 50,  st: 20, hp: 60 },
-  { name: "ガーディアン",   el: "earth", cost: 70,  st: 30, hp: 70 },
-  { name: "タイタン",       el: "earth", cost: 110, st: 50, hp: 80 },
-  { name: "ハーピー",       el: "wind",  cost: 35,  st: 30, hp: 25 },
-  { name: "グリフォン",     el: "wind",  cost: 65,  st: 45, hp: 35 },
-  { name: "テンペスト",     el: "wind",  cost: 95,  st: 60, hp: 45 },
+  { name: "ヒヨコ戦士",     el: "fire",  cost: 30,  st: 20, hp: 30, img: "chick" },
+  { name: "サラマンダー",   el: "fire",  cost: 60,  st: 40, hp: 40, img: "salamander" },
+  { name: "フェニックス",   el: "fire",  cost: 90,  st: 50, hp: 60, img: "phoenix" },
+  { name: "マーマン",       el: "water", cost: 40,  st: 25, hp: 45, img: "merman" },
+  { name: "クラーケン",     el: "water", cost: 80,  st: 45, hp: 55, img: "kraken" },
+  { name: "リヴァイアサン", el: "water", cost: 100, st: 55, hp: 65, img: "leviathan" },
+  { name: "ゴーレム",       el: "earth", cost: 50,  st: 20, hp: 60, img: "golem" },
+  { name: "ガーディアン",   el: "earth", cost: 70,  st: 30, hp: 70, img: "guardian" },
+  { name: "タイタン",       el: "earth", cost: 110, st: 50, hp: 80, img: "titan" },
+  { name: "ハーピー",       el: "wind",  cost: 35,  st: 30, hp: 25, img: "harpy" },
+  { name: "グリフォン",     el: "wind",  cost: 65,  st: 45, hp: 35, img: "griffon" },
+  { name: "テンペスト",     el: "wind",  cost: 95,  st: 60, hp: 45, img: "tempest" },
 ];
+const CARD_IMG_DIR = "assets/cards/";
+
+// png→jpg の順に試し、両方無ければ hide する <img> を生成
+function imgTag(slug, cls, hideTarget) {
+  const hide = hideTarget === "parent" ? "this.parentNode.style.display='none'" : "this.style.display='none'";
+  return `<img class="${cls}" loading="lazy" alt="" src="${CARD_IMG_DIR}${slug}.png"` +
+    ` onerror="if(!this.dataset.t){this.dataset.t=1;this.src='${CARD_IMG_DIR}${slug}.jpg'}else{${hide}}">`;
+}
 
 /* ---------- ユーティリティ ---------- */
 const $ = (s) => document.querySelector(s);
@@ -96,7 +105,7 @@ function amHost() { return room.state && room.state.host === myId; }
 function placeCreature(s, i, ownerId, card) {
   const bonus = BOARD[i].el === card.el ? 10 : 0;
   const maxHp = card.hp + bonus;
-  s.lands[i] = { owner: ownerId, creature: { name: card.name, el: card.el, st: card.st, hp: maxHp, maxHp, cost: card.cost } };
+  s.lands[i] = { owner: ownerId, creature: { name: card.name, el: card.el, st: card.st, hp: maxHp, maxHp, cost: card.cost, img: card.img } };
 }
 
 function payToll(s, p, owner, toll) {
@@ -273,6 +282,8 @@ function renderBoard(s) {
       html = `<div class="c-el">${ELEMENTS[cell.el].name}</div>`;
       if (land) {
         const o = playerById(s, land.owner);
+        if (land.creature.img)
+          html = imgTag(land.creature.img, "cell-img", "self") + html;
         html += `<div class="c-cr">${land.creature.name}</div>
           <div class="c-cr">⚔${land.creature.st}❤${land.creature.hp}</div>
           <div class="c-toll" style="color:${o.color}">${o.name} ${tollOf(land)}G</div>`;
@@ -338,7 +349,9 @@ function renderHandButtons(container, p, onPick, landEl) {
     const tooExp = landEl !== undefined && card.cost > p.magic;
     if (tooExp) b.classList.add("disabled");
     const match = landEl !== undefined && landEl === card.el ? "+10" : "";
-    b.innerHTML = `<div class="card-name">${card.name}</div>
+    const img = card.img ? `<div class="card-img">${imgTag(card.img, "", "parent")}</div>` : "";
+    b.innerHTML = img +
+      `<div class="card-name">${card.name}</div>
       <div class="card-stat"><span>${ELEMENTS[card.el].name}</span><span class="card-cost">${card.cost}G</span></div>
       <div class="card-stat"><span>⚔${card.st}</span><span>❤${card.hp}${match}</span></div>`;
     b.onclick = () => { if (!tooExp) onPick(idx); };

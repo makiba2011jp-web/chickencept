@@ -530,7 +530,8 @@ function toggleMute() {
   updateMuteBtn();
 }
 
-// 最初のユーザー操作で「両方の曲」を解禁する（後で曲を切り替えても鳴るように）
+// 最初のユーザー操作で「今の曲以外」を“消音したまま”一瞬再生して解禁する
+// （音を漏らさず、後で曲を切り替えても鳴るようにする）
 let audioUnlocked = false;
 function unlockAudio() {
   const ctx = audioCtx();
@@ -538,12 +539,15 @@ function unlockAudio() {
   if (audioUnlocked) return;
   audioUnlocked = true;
   [bgmTitle, bgmGame].forEach((a) => {
+    if (a === currentBgm) return; // 今の曲はそのまま（playTrackが管理）
+    a.muted = true;
+    const done = () => { a.pause(); a.currentTime = 0; a.muted = false; };
     const p = a.play();
-    if (p) p.then(() => {
-      // 今鳴らすべき曲以外（とミュート時）は止めておく
-      if (muted || a !== currentBgm) { a.pause(); a.currentTime = 0; }
-    }).catch(() => {});
+    if (p && p.then) p.then(done).catch(() => { a.muted = false; });
+    else done();
   });
+  // 今の画面の曲を（ミュートでなければ）鳴らす
+  if (!muted && currentBgm) currentBgm.play().catch(() => {});
 }
 
 /* ---------- 効果音（Web Audioで合成。音声ファイル不要） ---------- */

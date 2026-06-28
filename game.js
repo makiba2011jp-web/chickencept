@@ -54,12 +54,26 @@ const CREATURES = [
   { name: "テンペスト",     el: "wind",  cost: 95,  st: 60, hp: 45, img: "tempest" },
 ];
 const CARD_IMG_DIR = "assets/cards/";
+const IMG_URL = {}; // slug -> 解決済みURL（null=画像なし / undefined=未解決）
 
-// png→jpg の順に試し、両方無ければ hide する <img> を生成
-function imgTag(slug, cls, hideTarget) {
-  const hide = hideTarget === "parent" ? "this.parentNode.style.display='none'" : "this.style.display='none'";
-  return `<img class="${cls}" loading="lazy" alt="" src="${CARD_IMG_DIR}${slug}.png"` +
-    ` onerror="if(!this.dataset.t){this.dataset.t=1;this.src='${CARD_IMG_DIR}${slug}.jpg'}else{${hide}}">`;
+// 起動時に各画像の拡張子(png/jpg/jpeg/webp)を1回だけ判定してURLを確定する
+function preloadImages(done) {
+  const slugs = [...new Set(CREATURES.map((c) => c.img).filter(Boolean))];
+  let remaining = slugs.length;
+  if (!remaining) { if (done) done(); return; }
+  slugs.forEach((slug) => {
+    const exts = ["png", "jpg", "jpeg", "webp"];
+    const finish = () => { if (--remaining === 0 && done) done(); };
+    const tryNext = (i) => {
+      if (i >= exts.length) { IMG_URL[slug] = null; finish(); return; }
+      const url = CARD_IMG_DIR + slug + "." + exts[i];
+      const im = new Image();
+      im.onload = () => { IMG_URL[slug] = url; finish(); };
+      im.onerror = () => tryNext(i + 1);
+      im.src = url;
+    };
+    tryNext(0);
+  });
 }
 
 /* ---------- ユーティリティ ---------- */
@@ -282,8 +296,8 @@ function renderBoard(s) {
       html = `<div class="c-el">${ELEMENTS[cell.el].name}</div>`;
       if (land) {
         const o = playerById(s, land.owner);
-        if (land.creature.img)
-          html = imgTag(land.creature.img, "cell-img", "self") + html;
+        const lImg = IMG_URL[land.creature.img];
+        if (lImg) html = `<img class="cell-img" src="${lImg}" alt="">` + html;
         html += `<div class="c-cr">${land.creature.name}</div>
           <div class="c-cr">⚔${land.creature.st}❤${land.creature.hp}</div>
           <div class="c-toll" style="color:${o.color}">${o.name} ${tollOf(land)}G</div>`;
@@ -349,7 +363,8 @@ function renderHandButtons(container, p, onPick, landEl) {
     const tooExp = landEl !== undefined && card.cost > p.magic;
     if (tooExp) b.classList.add("disabled");
     const match = landEl !== undefined && landEl === card.el ? "+10" : "";
-    const img = card.img ? `<div class="card-img">${imgTag(card.img, "", "parent")}</div>` : "";
+    const cImg = IMG_URL[card.img];
+    const img = cImg ? `<div class="card-img"><img src="${cImg}" alt=""></div>` : "";
     b.innerHTML = img +
       `<div class="card-name">${card.name}</div>
       <div class="card-stat"><span>${ELEMENTS[card.el].name}</span><span class="card-cost">${card.cost}G</span></div>
@@ -530,6 +545,9 @@ function boot() {
   // 最初の操作で両方の曲を解禁（自動再生ブロック＆曲切替対策）
   ["pointerdown", "click", "keydown"].forEach((ev) =>
     document.addEventListener(ev, unlockAudio, { passive: true }));
+
+  // 画像URLを事前確定 → 確定後に再描画
+  preloadImages(render);
 
   if (!netReady()) {
     $("#configWarn").classList.remove("hidden");

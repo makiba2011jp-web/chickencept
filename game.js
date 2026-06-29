@@ -18,6 +18,9 @@ const ELEMENTS = {
   fire:  { name: "火" }, water: { name: "水" },
   earth: { name: "地" }, wind:  { name: "風" },
 };
+// 属性相性：キーは値に対して有利（攻撃力1.5倍）。 火→風→地→水→火 の循環
+const STRONG = { fire: "wind", wind: "earth", earth: "water", water: "fire" };
+const MAX_LEVEL = 5; // 土地の最大レベル
 
 const BOARD = [
   { type: "start", grid: [1, 1] },
@@ -56,16 +59,17 @@ const CREATURES = [
 CREATURES.forEach((c) => (c.type = "creature"));
 
 // アイテムカード：戦闘時に1枚使用（使い切り）。effect: hp=体力, st=攻撃, mirror=反射
+// cost: 戦闘で使用する際の使用料金
 const ITEMS = [
-  { name: "くさりかたびら", type: "item", effect: "hp", value: 10, img: "chainmail" },
-  { name: "鋼鉄の盾",       type: "item", effect: "hp", value: 20, img: "steelshield" },
-  { name: "伝説の鎧",       type: "item", effect: "hp", value: 30, img: "legendarmor" },
-  { name: "しぶきの鎧",     type: "item", effect: "hp", value: 40, img: "sprayarmor" },
-  { name: "針",             type: "item", effect: "st", value: 10, img: "needle" },
-  { name: "包丁",           type: "item", effect: "st", value: 20, img: "kitchenknife" },
-  { name: "マシンガン",     type: "item", effect: "st", value: 30, img: "machinegun" },
-  { name: "戦車砲",         type: "item", effect: "st", value: 40, img: "tankcannon" },
-  { name: "スーパーかがみ", type: "item", effect: "mirror", value: 0, img: "mirror" },
+  { name: "くさりかたびら", type: "item", effect: "hp", value: 10, cost: 10, img: "chainmail" },
+  { name: "鋼鉄の盾",       type: "item", effect: "hp", value: 20, cost: 20, img: "steelshield" },
+  { name: "伝説の鎧",       type: "item", effect: "hp", value: 30, cost: 30, img: "legendarmor" },
+  { name: "しぶきの鎧",     type: "item", effect: "hp", value: 40, cost: 40, img: "sprayarmor" },
+  { name: "針",             type: "item", effect: "st", value: 10, cost: 10, img: "needle" },
+  { name: "包丁",           type: "item", effect: "st", value: 20, cost: 20, img: "kitchenknife" },
+  { name: "マシンガン",     type: "item", effect: "st", value: 30, cost: 30, img: "machinegun" },
+  { name: "戦車砲",         type: "item", effect: "st", value: 40, cost: 40, img: "tankcannon" },
+  { name: "スーパーかがみ", type: "item", effect: "mirror", value: 0, cost: 40, img: "mirror" },
 ];
 
 const CARD_IMG_DIR = "assets/cards/";
@@ -107,7 +111,9 @@ function drawCard() {
   return { ...pool[Math.floor(Math.random() * pool.length)] };
 }
 function refill(p) { while (p.hand.length < HAND_SIZE) p.hand.push(drawCard()); }
-function tollOf(land) { return land && land.creature ? Math.round(land.creature.cost * 0.4) + 10 : 0; }
+function baseToll(creature) { return Math.round(creature.cost * 0.4) + 10; }
+// レベルが上がるほど通行料が増える
+function tollOf(land) { return land && land.creature ? baseToll(land.creature) * (land.level || 1) : 0; }
 function playerById(s, id) { return s.players.find((p) => p.id === id); }
 function totalMagic(s, p) {
   let t = p.magic;
@@ -139,7 +145,7 @@ function amHost() { return room.state && room.state.host === myId; }
 function placeCreature(s, i, ownerId, card) {
   const bonus = BOARD[i].el === card.el ? 10 : 0;
   const maxHp = card.hp + bonus;
-  s.lands[i] = { owner: ownerId, creature: { name: card.name, el: card.el, st: card.st, hp: maxHp, maxHp, cost: card.cost, img: card.img } };
+  s.lands[i] = { owner: ownerId, level: 1, creature: { name: card.name, el: card.el, st: card.st, hp: maxHp, maxHp, cost: card.cost, img: card.img } };
 }
 
 function payToll(s, p, owner, toll) {
@@ -165,7 +171,13 @@ function resolveLanding(s, p) {
   if (cell.type === "start") { pushLog(s, `${p.name} はスタートに止まった`, "system"); endTurn(s, p); return; }
   const land = s.lands[i];
   if (!land) { s.phase = "await_summon"; s.pendingLand = i; return; }
-  if (land.owner === p.id) { pushLog(s, `${p.name} は自分の土地に止まった`, "system"); endTurn(s, p); return; }
+  if (land.owner === p.id) {
+    const g = tollOf(land);
+    p.magic += g;
+    pushLog(s, `🏠 ${p.name} は自分の土地に止まり +${g}G`, "system");
+    ev(s, "coin");
+    endTurn(s, p); return;
+  }
   s.phase = "await_enemy"; s.pendingLand = i;
 }
 
@@ -175,7 +187,18 @@ function mRoll(s) {
   const p = playerById(s, myId);
   const dice = rollDice(); s.dice = dice;
   let bonus = 0;
-  for (let k = 0; k < dice; k++) { p.pos = (p.pos + 1) % BOARD.length; if (BOARD[p.pos].type === "start") bonus += START_BONUS; }
+  for (let k = 0; k < dice; k++) {
+    p.pos = (p.pos + 1) % BOARD.length;
+    if (BOARD[p.pos].type === "start") bonus += START_BONUS;
+    // 最終マス以外（＝通過）で自分の土地ならモンスターがレベルアップ
+    if (k < dice - 1) {
+      const l = s.lands[p.pos];
+      if (l && l.owner === p.id && (l.level || 1) < MAX_LEVEL) {
+        l.level = (l.level || 1) + 1;
+        pushLog(s, `⬆ ${p.name} の ${l.creature.name} がLv${l.level}に成長! 通行料${tollOf(l)}G`, "system");
+      }
+    }
+  }
   if (bonus) { p.magic += bonus; pushLog(s, `🏁 ${p.name} スタート通過 +${bonus}G`, "system"); }
   pushLog(s, `🎲 ${p.name} は ${dice} を出した`);
   ev(s, "dice");
@@ -201,7 +224,7 @@ function mEnemy(s, choice) {
   const p = playerById(s, myId), i = s.pendingLand, land = s.lands[i];
   const owner = playerById(s, land.owner);
   if (choice === "toll") { payToll(s, p, owner, tollOf(land)); ev(s, "coin"); endTurn(s, p); return s; }
-  if (choice === "invade") { if (!p.hand.some((c) => c.type === "creature")) return false; s.phase = "await_invade"; return s; }
+  if (choice === "invade") { if (!p.hand.some((c) => c.type === "creature" && c.cost <= p.magic)) return false; s.phase = "await_invade"; return s; }
   return false;
 }
 
@@ -212,8 +235,10 @@ function mInvadeCreature(s, cardIdx) {
   const owner = playerById(s, land.owner);
   if (cardIdx < 0) { payToll(s, p, owner, tollOf(land)); ev(s, "coin"); endTurn(s, p); return s; }
   const card = p.hand[cardIdx];
-  if (!card || card.type !== "creature") return false;
+  if (!card || card.type !== "creature" || card.cost > p.magic) return false;
+  p.magic -= card.cost; // モンスター使用料金
   p.hand.splice(cardIdx, 1);
+  pushLog(s, `⚔ ${p.name} が ${card.name} で侵略（使用料 -${card.cost}G）`, "battle");
   s.battle = { i, attackerId: myId, defenderId: land.owner, attCard: card, attItem: null, defItem: null };
   s.phase = "await_att_item";
   return s;
@@ -225,9 +250,11 @@ function mAttItem(s, itemIdx) {
   const p = playerById(s, myId);
   if (itemIdx >= 0) {
     const it = p.hand[itemIdx];
-    if (!it || it.type !== "item") return false;
+    if (!it || it.type !== "item" || it.cost > p.magic) return false;
+    p.magic -= it.cost; // アイテム使用料金
     p.hand.splice(itemIdx, 1);
     s.battle.attItem = it;
+    pushLog(s, `🗡 ${p.name} が ${it.name} を使用（-${it.cost}G）`, "battle");
   }
   // 守備側がアイテムを持っていれば防御フェーズへ、なければ即解決
   const def = playerById(s, s.battle.defenderId);
@@ -242,15 +269,17 @@ function mDefItem(s, itemIdx) {
   const d = playerById(s, myId);
   if (itemIdx >= 0) {
     const it = d.hand[itemIdx];
-    if (!it || it.type !== "item") return false;
+    if (!it || it.type !== "item" || it.cost > d.magic) return false;
+    d.magic -= it.cost; // アイテム使用料金
     d.hand.splice(itemIdx, 1);
     s.battle.defItem = it;
+    pushLog(s, `🛡 ${d.name} が ${it.name} を使用（-${it.cost}G）`, "battle");
   }
   resolveBattle(s);
   return s;
 }
 
-// 戦闘解決（アイテム効果込み）
+// 戦闘解決（アイテム効果＋属性相性込み、バトルシーン用データを生成）
 function resolveBattle(s) {
   const b = s.battle, i = b.i, land = s.lands[i];
   const att = playerById(s, b.attackerId);
@@ -265,35 +294,57 @@ function resolveBattle(s) {
     if (b.defItem.effect === "hp") dHp += b.defItem.value;
     if (b.defItem.effect === "mirror") dMirror = true;
   }
+  // 属性相性（有利な側はST1.5倍）
+  const aAdv = STRONG[aCard.el] === dCre.el;
+  const dAdv = STRONG[dCre.el] === aCard.el;
+  if (aAdv) aSt = Math.round(aSt * 1.5);
+  if (dAdv) dSt = Math.round(dSt * 1.5);
 
-  pushLog(s, `⚔ ${att.name}:${aCard.name}(⚔${aSt} ❤${aHp}) → ${owner.name}:${dCre.name}(❤${dHp})`, "battle");
-  if (b.attItem) pushLog(s, `🗡 ${att.name} が ${b.attItem.name} を装備`, "battle");
-  if (b.defItem) pushLog(s, `🛡 ${owner.name} が ${b.defItem.name} を使用`, "battle");
-
+  const aHp0 = aHp, dHp0 = dHp, steps = [];
   let captured = false;
+
+  pushLog(s, `⚔ ${att.name}:${aCard.name}(⚔${aSt}${aAdv ? "↑" : ""} ❤${aHp}) vs ${owner.name}:${dCre.name}(⚔${dSt}${dAdv ? "↑" : ""} ❤${dHp})`, "battle");
+  if (aAdv) pushLog(s, `🔥 属性有利! ${aCard.name} の攻撃UP`, "battle");
+  if (dAdv) pushLog(s, `🔥 属性有利! ${dCre.name} の反撃UP`, "battle");
+
   if (dMirror) {
-    aHp -= aSt; // 攻撃を跳ね返す
-    pushLog(s, `🪞 スーパーかがみ! 攻撃を跳ね返した（${aCard.name} ❤${aHp}）`, "battle");
-    if (aHp <= 0) pushLog(s, `💀 ${aCard.name} は跳ね返りで倒れた。侵略失敗`, "battle");
-    else {
+    aHp -= aSt;
+    steps.push({ target: "att", dmg: aSt, attHp: Math.max(0, aHp), defHp: Math.max(0, dHp), note: "🪞反射" });
+    pushLog(s, `🪞 スーパーかがみ! 攻撃を跳ね返した（${aCard.name} ❤${Math.max(0, aHp)}）`, "battle");
+    if (aHp > 0) {
       aHp -= dSt;
-      if (aHp <= 0) pushLog(s, `💀 ${dCre.name} の反撃で ${aCard.name} 撃破。侵略失敗`, "battle");
-      else pushLog(s, `↩ 侵略失敗、${aCard.name} は撤退`, "battle");
+      steps.push({ target: "att", dmg: dSt, attHp: Math.max(0, aHp), defHp: Math.max(0, dHp) });
     }
   } else {
-    dHp -= aSt; // 攻撃側が先制
-    if (dHp <= 0) {
-      captured = true;
-      pushLog(s, `💥 ${dCre.name} を撃破! ${att.name} が土地を奪取!`, "battle");
-    } else {
-      aHp -= dSt; // 守備側の反撃
-      if (aHp <= 0) pushLog(s, `💀 ${dCre.name} の反撃で ${aCard.name} 撃破。侵略失敗`, "battle");
-      else pushLog(s, `↩ 両者生存。侵略失敗、${aCard.name} は撤退`, "battle");
+    dHp -= aSt;
+    steps.push({ target: "def", dmg: aSt, attHp: Math.max(0, aHp), defHp: Math.max(0, dHp) });
+    if (dHp <= 0) captured = true;
+    else {
+      aHp -= dSt;
+      steps.push({ target: "att", dmg: dSt, attHp: Math.max(0, aHp), defHp: Math.max(0, dHp) });
     }
   }
-  if (captured) placeCreature(s, i, b.attackerId, aCard);
+
+  if (captured) {
+    pushLog(s, `💥 ${dCre.name} を撃破! ${att.name} が土地を奪取!`, "battle");
+    placeCreature(s, i, b.attackerId, aCard);
+  } else {
+    pushLog(s, `🛡 ${owner.name} が防衛成功。侵略失敗`, "battle");
+    payToll(s, att, owner, tollOf(land)); // 侵略失敗 → 通行料を払う
+  }
   refill(att); refill(owner);
-  ev(s, "battle");
+
+  // バトルシーン用データ（全端末で同じ演出を再生）
+  s.seq = (s.seq || 0) + 1;
+  s.lastBattle = {
+    seq: s.seq,
+    att: { name: aCard.name, img: aCard.img, color: att.color, st: aSt, hp0: aHp0, el: aCard.el, adv: aAdv, item: b.attItem ? b.attItem.name : null },
+    def: { name: dCre.name, img: dCre.img, color: owner.color, st: dSt, hp0: dHp0, el: dCre.el, adv: dAdv, item: b.defItem ? b.defItem.name : null },
+    steps, captured,
+    result: captured ? `${att.name} が土地を奪取！` : `${owner.name} が防衛成功`,
+  };
+  s.lastEvent = { seq: s.seq, sfx: "none" }; // 戦闘音はバトルシーン側で鳴らす
+
   s.battle = null;
   endTurn(s, att);
 }
@@ -328,8 +379,10 @@ function render() {
   syncBgm();
   checkSfx();
   checkVictory();
-  if (!room.state) { show("home"); return; }
-  if (room.state.phase === "lobby") { show("lobby"); renderLobby(); return; }
+  checkBattle();
+  if (!room.state) { displayPos = {}; show("home"); return; }
+  if (room.state.phase === "lobby") { displayPos = {}; show("lobby"); renderLobby(); return; }
+  checkDraw(room.state);
   show("game"); renderGame();
 }
 
@@ -358,7 +411,22 @@ function renderGame() {
   renderPlayersBar(s);
   renderBoard(s);
   renderControls(s);
+  renderMyHand(s);
   renderLog(s);
+  animateTokens();
+}
+
+// 自分の手札を常時表示（閲覧用）
+function renderMyHand(s) {
+  const wrap = $("#myHand");
+  const meP = playerById(s, myId);
+  if (!meP) { wrap.innerHTML = ""; return; }
+  let html = '<div class="myhand-title">あなたの手札</div><div class="hand">';
+  meP.hand.forEach((card) => {
+    html += `<div class="card ${card.type === "item" ? "item" : card.el}">${cardInner(card)}</div>`;
+  });
+  html += "</div>";
+  wrap.innerHTML = html;
 }
 
 function renderPlayersBar(s) {
@@ -395,13 +463,14 @@ function renderBoard(s) {
         const o = playerById(s, land.owner);
         const lImg = IMG_URL[land.creature.img];
         if (lImg) html = `<img class="cell-img" src="${lImg}" alt="">` + html;
-        html += `<div class="c-cr">${land.creature.name}</div>
+        const lv = (land.level || 1) > 1 ? `<span class="c-lv">Lv${land.level}</span>` : "";
+        html += `<div class="c-cr">${land.creature.name}${lv}</div>
           <div class="c-cr">⚔${land.creature.st}❤${land.creature.hp}</div>
           <div class="c-toll" style="color:${o.color}">${o.name} ${tollOf(land)}G</div>`;
       } else html += `<div class="c-empty">空き地</div>`;
     }
     let tokens = '<div class="tokens">';
-    s.players.forEach((p) => { if (p.pos === i) tokens += `<span class="token" style="background:${p.color}"></span>`; });
+    s.players.forEach((p) => { if (tokenPos(p) === i) tokens += `<span class="token" style="background:${p.color}"></span>`; });
     div.innerHTML = html + tokens + "</div>";
     board.appendChild(div);
   });
@@ -426,8 +495,8 @@ function renderControls(s) {
     const aSt = s.battle.attCard.st + (s.battle.attItem && s.battle.attItem.effect === "st" ? s.battle.attItem.value : 0);
     if (s.battle.defenderId === myId) {
       addHead(c, `<b style="color:#e74c3c">🛡 防御！</b>`);
-      addText(c, `${att.name} の ${s.battle.attCard.name}（⚔${aSt}${s.battle.attItem ? "・" + s.battle.attItem.name : ""}）が ${land.creature.name}（❤${land.creature.maxHp}）を攻撃中。防御アイテムを使う？`);
-      renderHandChoices(c, def.hand, { itemsOnly: true }, (idx) => commit((s2) => mDefItem(s2, idx)));
+      addText(c, `${att.name} の ${s.battle.attCard.name}（⚔${aSt}${s.battle.attItem ? "・" + s.battle.attItem.name : ""}）が ${land.creature.name}（❤${land.creature.maxHp}）を攻撃中。防御アイテムを使う？（使用料が必要）`);
+      renderHandChoices(c, def.hand, { itemsOnly: true, costCheck: def }, (idx) => commit((s2) => mDefItem(s2, idx)));
       addBtn(c, "アイテムなしで防御", () => commit((s2) => mDefItem(s2, -1)));
     } else {
       addHead(c, `<span style="color:${def.color}">${def.name}</span> が防御アイテムを選んでいます…`);
@@ -452,17 +521,18 @@ function renderControls(s) {
     addBtn(c, "召喚しない", () => commit((s2) => mSummon(s2, -1)));
   } else if (s.phase === "await_enemy") {
     const land = s.lands[s.pendingLand];
-    addText(c, `敵地：${land.creature.name} ⚔${land.creature.st} ❤${land.creature.maxHp}`);
-    if (p.hand.some((card) => card.type === "creature"))
+    const lv = (land.level || 1) > 1 ? ` Lv${land.level}` : "";
+    addText(c, `敵地：${land.creature.name}${lv} ⚔${land.creature.st} ❤${land.creature.maxHp}（${ELEMENTS[land.creature.el].name}属性）`);
+    if (p.hand.some((card) => card.type === "creature" && card.cost <= p.magic))
       addBtn(c, "⚔ 侵略する", () => commit((s2) => mEnemy(s2, "invade")), "primary");
     addBtn(c, `💰 通行料 ${tollOf(land)}G`, () => commit((s2) => mEnemy(s2, "toll")));
   } else if (s.phase === "await_invade") {
-    addText(c, "侵略するクリーチャーを選択（コスト不要）");
-    renderHandChoices(c, p.hand, { creaturesOnly: true }, (idx) => commit((s2) => mInvadeCreature(s2, idx)));
+    addText(c, "侵略するクリーチャーを選択（使用料が必要・失敗すると通行料）");
+    renderHandChoices(c, p.hand, { creaturesOnly: true, costCheck: p }, (idx) => commit((s2) => mInvadeCreature(s2, idx)));
     addBtn(c, "やめて通行料を払う", () => commit((s2) => mInvadeCreature(s2, -1)));
   } else if (s.phase === "await_att_item") {
-    addText(c, `${s.battle.attCard.name} で侵略。攻撃アイテムを使う？（任意）`);
-    renderHandChoices(c, p.hand, { itemsOnly: true }, (idx) => commit((s2) => mAttItem(s2, idx)));
+    addText(c, `${s.battle.attCard.name} で侵略。攻撃アイテムを使う？（使用料が必要・任意）`);
+    renderHandChoices(c, p.hand, { itemsOnly: true, costCheck: p }, (idx) => commit((s2) => mAttItem(s2, idx)));
     addBtn(c, "アイテムなしで戦う", () => commit((s2) => mAttItem(s2, -1)));
   }
 }
@@ -481,7 +551,7 @@ function cardInner(card, landEl) {
   if (card.type === "item") {
     const eff = card.effect === "hp" ? `❤+${card.value}` : card.effect === "st" ? `⚔+${card.value}` : "🪞反射";
     return img + `<div class="card-name">${card.name}</div>
-      <div class="card-stat"><span>アイテム</span><span>${eff}</span></div>`;
+      <div class="card-stat"><span>${eff}</span><span class="card-cost">${card.cost}G</span></div>`;
   }
   const match = landEl && landEl === card.el ? "+10" : "";
   return img + `<div class="card-name">${card.name}</div>
@@ -500,7 +570,7 @@ function renderHandChoices(container, hand, opts, onPick) {
     shown++;
     const b = document.createElement("button");
     b.className = "card " + (card.type === "item" ? "item" : card.el);
-    const disabled = opts.costCheck && card.type === "creature" && card.cost > opts.costCheck.magic;
+    const disabled = opts.costCheck && (card.cost || 0) > opts.costCheck.magic;
     if (disabled) b.classList.add("disabled");
     b.innerHTML = cardInner(card, opts.landEl);
     b.onclick = () => { if (!disabled) onPick(idx, card); };
@@ -565,6 +635,10 @@ function mBackToLobby(s) {
 function attach(code) {
   room.code = code;
   location.hash = code;
+  // 部屋ごとに演出・検出の状態をリセット
+  lastSfxSeq = null; lastBattleSeq = null; prevHandKey = null;
+  victoryShown = false; displayPos = {};
+  if (moveTimer) { clearTimeout(moveTimer); moveTimer = null; }
   if (room.channel) sb.removeChannel(room.channel);
   room.channel = sbSubscribe(code, onRemote);
 }
@@ -717,7 +791,125 @@ function checkSfx() {
   const e = room.state && room.state.lastEvent;
   if (!e) return;
   if (lastSfxSeq === null) { lastSfxSeq = e.seq; return; } // 初回（途中参加等）は鳴らさない
-  if (e.seq > lastSfxSeq) { lastSfxSeq = e.seq; playSfx(e.sfx); }
+  if (e.seq > lastSfxSeq) {
+    lastSfxSeq = e.seq;
+    if (e.sfx === "dice") animateDice(room.state.dice);
+    if (e.sfx !== "none") playSfx(e.sfx);
+  }
+}
+
+/* ---------- サイコロ演出 ---------- */
+function animateDice(value) {
+  const box = $("#diceBox");
+  if (!box || !value) return;
+  box.classList.remove("hidden");
+  box.classList.add("rolling");
+  const iv = setInterval(() => { box.textContent = "🎲" + (1 + Math.floor(Math.random() * 6)); }, 70);
+  setTimeout(() => { clearInterval(iv); box.textContent = "🎲" + value; box.classList.remove("rolling"); }, 700);
+}
+
+/* ---------- 駒の移動アニメーション ---------- */
+let displayPos = {};
+let moveTimer = null;
+function tokenPos(p) { return displayPos[p.id] != null ? displayPos[p.id] : p.pos; }
+function animateTokens() {
+  const s = room.state;
+  if (!s || !s.players) return;
+  s.players.forEach((p) => { if (displayPos[p.id] == null) displayPos[p.id] = p.pos; });
+  if (moveTimer) return;
+  const step = () => {
+    const st = room.state;
+    if (!st || !st.players) { moveTimer = null; return; }
+    let moved = false;
+    for (const p of st.players) {
+      if (displayPos[p.id] != null && displayPos[p.id] !== p.pos) {
+        displayPos[p.id] = (displayPos[p.id] + 1) % BOARD.length;
+        moved = true; break;
+      }
+    }
+    if (moved) { renderBoard(st); moveTimer = setTimeout(step, 170); }
+    else { moveTimer = null; }
+  };
+  if (s.players.some((p) => displayPos[p.id] !== p.pos)) step();
+}
+
+/* ---------- バトルシーン演出 ---------- */
+let lastBattleSeq = null;
+function checkBattle() {
+  const bt = room.state && room.state.lastBattle;
+  if (!bt) return;
+  if (lastBattleSeq === null) { lastBattleSeq = bt.seq; return; }
+  if (bt.seq > lastBattleSeq) { lastBattleSeq = bt.seq; playBattleScene(bt); }
+}
+function setFighter(prefix, f) {
+  const el = $("#" + prefix);
+  el.querySelector(".fighter-name").innerHTML = `${f.name}${f.adv ? " 🔥" : ""}`;
+  el.querySelector(".fighter-name").style.color = f.color;
+  const url = IMG_URL[f.img];
+  el.querySelector(".fighter-img").innerHTML = url ? `<img src="${url}" alt="">` : "❓";
+  el.querySelector(".fighter-sub").textContent = `⚔${f.st}` + (f.item ? " ・" + f.item : "");
+  el.querySelector(".hpfill").style.width = "100%";
+  el.querySelector(".hpnum").textContent = "❤" + f.hp0;
+}
+function flashDamage(el, dmg) {
+  const d = document.createElement("div");
+  d.className = "dmg-float";
+  d.textContent = "-" + dmg;
+  el.appendChild(d);
+  setTimeout(() => d.remove(), 1000);
+}
+function playBattleScene(bt) {
+  setFighter("bAtt", bt.att);
+  setFighter("bDef", bt.def);
+  $("#battleResult").textContent = "";
+  $("#battle").classList.remove("hidden");
+  let t = 600;
+  bt.steps.forEach((stp) => {
+    setTimeout(() => {
+      const who = stp.target === "att" ? "bAtt" : "bDef";
+      const el = $("#" + who);
+      const max = stp.target === "att" ? bt.att.hp0 : bt.def.hp0;
+      const hp = stp.target === "att" ? stp.attHp : stp.defHp;
+      el.querySelector(".hpfill").style.width = Math.max(0, (hp / max) * 100) + "%";
+      el.querySelector(".hpnum").textContent = "❤" + hp;
+      el.classList.add("hit");
+      setTimeout(() => el.classList.remove("hit"), 320);
+      flashDamage(el, stp.dmg);
+      playSfx("battle");
+    }, t);
+    t += 950;
+  });
+  setTimeout(() => { $("#battleResult").textContent = bt.result; }, t);
+  setTimeout(() => { $("#battle").classList.add("hidden"); }, t + 1700);
+}
+
+/* ---------- ドロー通知（自分が引いたカードを表示） ---------- */
+let toastTimer = null;
+function showToast(msg) {
+  const t = $("#toast");
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add("show");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2400);
+}
+let prevHandKey = null, prevHandNames = [];
+function multisetDiff(newer, older) {
+  const pool = older.slice(), added = [];
+  newer.forEach((n) => { const k = pool.indexOf(n); if (k >= 0) pool.splice(k, 1); else added.push(n); });
+  return added;
+}
+function checkDraw(s) {
+  const meP = playerById(s, myId);
+  if (!meP || !meP.hand) { prevHandKey = null; return; }
+  const names = meP.hand.map((c) => c.name).sort();
+  const key = names.join("|");
+  if (prevHandKey === null) { prevHandKey = key; prevHandNames = names; return; }
+  if (key !== prevHandKey) {
+    const added = multisetDiff(names, prevHandNames);
+    prevHandKey = key; prevHandNames = names;
+    if (added.length) showToast("🃏 引いた: " + added.join("、"));
+  }
 }
 
 /* ---------- 勝利演出 ---------- */

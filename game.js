@@ -73,21 +73,26 @@ const ITEMS = [
 ];
 
 const CARD_IMG_DIR = "assets/cards/";
-const IMG_URL = {}; // slug -> 解決済みURL（null=画像なし / undefined=未解決）
+const TOKEN_IMG_DIR = "assets/tokens/"; // プレイヤーの駒画像（参加順 p1〜p4）
+const TOKEN_SLUGS = ["p1", "p2", "p3", "p4"];
+const IMG_URL = {};    // カード slug -> URL（null=なし）
+const TOKEN_URL = {};  // 駒 slug -> URL（null=なし）
 
-// 起動時に各画像の拡張子(png/jpg/jpeg/webp)を1回だけ判定してURLを確定する
+// 起動時にカード画像・駒画像の拡張子(png/jpg/jpeg/webp)を1回だけ判定してURLを確定する
 function preloadImages(done) {
-  const slugs = [...new Set([...CREATURES, ...ITEMS].map((c) => c.img).filter(Boolean))];
-  let remaining = slugs.length;
+  const exts = ["png", "jpg", "jpeg", "webp"];
+  const cardSlugs = [...new Set([...CREATURES, ...ITEMS].map((c) => c.img).filter(Boolean))];
+  const jobs = cardSlugs.map((s) => ({ dir: CARD_IMG_DIR, slug: s, map: IMG_URL }))
+    .concat(TOKEN_SLUGS.map((s) => ({ dir: TOKEN_IMG_DIR, slug: s, map: TOKEN_URL })));
+  let remaining = jobs.length;
   if (!remaining) { if (done) done(); return; }
-  slugs.forEach((slug) => {
-    const exts = ["png", "jpg", "jpeg", "webp"];
+  jobs.forEach((job) => {
     const finish = () => { if (--remaining === 0 && done) done(); };
     const tryNext = (i) => {
-      if (i >= exts.length) { IMG_URL[slug] = null; finish(); return; }
-      const url = CARD_IMG_DIR + slug + "." + exts[i];
+      if (i >= exts.length) { job.map[job.slug] = null; finish(); return; }
+      const url = job.dir + job.slug + "." + exts[i];
       const im = new Image();
-      im.onload = () => { IMG_URL[slug] = url; finish(); };
+      im.onload = () => { job.map[job.slug] = url; finish(); };
       im.onerror = () => tryNext(i + 1);
       im.src = url;
     };
@@ -432,12 +437,14 @@ function renderMyHand(s) {
 function renderPlayersBar(s) {
   const bar = $("#playersBar");
   bar.innerHTML = "";
-  s.players.forEach((p) => {
+  s.players.forEach((p, idx) => {
     const owned = s.lands.filter((l) => l && l.owner === p.id).length;
     const div = document.createElement("div");
     div.className = "pbar" + (p.id === s.turn ? " active" : "");
     div.style.borderColor = p.color;
-    div.innerHTML = `<div class="pbar-name" style="color:${p.color}">${p.name}${p.id === myId ? "★" : ""}</div>
+    const turl = TOKEN_URL[TOKEN_SLUGS[idx]];
+    const tok = turl ? `<span class="pbar-token" style="border-color:${p.color}"><img src="${turl}" alt=""></span>` : "";
+    div.innerHTML = `<div class="pbar-name" style="color:${p.color}">${tok}${p.name}${p.id === myId ? "★" : ""}</div>
       <div class="pbar-magic">${totalMagic(s, p)}G</div>
       <div class="pbar-sub">現金${p.magic} 地${owned}</div>`;
     bar.appendChild(div);
@@ -470,7 +477,12 @@ function renderBoard(s) {
       } else html += `<div class="c-empty">空き地</div>`;
     }
     let tokens = '<div class="tokens">';
-    s.players.forEach((p) => { if (tokenPos(p) === i) tokens += `<span class="token" style="background:${p.color}"></span>`; });
+    s.players.forEach((p, idx) => {
+      if (tokenPos(p) !== i) return;
+      const turl = TOKEN_URL[TOKEN_SLUGS[idx]];
+      if (turl) tokens += `<span class="token tokenimg" style="border-color:${p.color}"><img src="${turl}" alt=""></span>`;
+      else tokens += `<span class="token" style="background:${p.color}"></span>`;
+    });
     div.innerHTML = html + tokens + "</div>";
     board.appendChild(div);
   });
